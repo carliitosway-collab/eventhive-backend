@@ -1,8 +1,14 @@
 const router = require("express").Router();
-const Event = require("../models/Event.model");
-const { isAuthenticated } = require("../middleware/jwt.middleware");
-const Comment = require("../models/Comment.model");
+const mongoose = require("mongoose");
 
+const Event = require("../models/Event.model");
+const Comment = require("../models/Comment.model");
+const { isAuthenticated } = require("../middleware/jwt.middleware");
+
+// ✅ GET /api/events/test -> prueba rápida (IMPORTANTE: antes de "/:eventId")
+router.get("/test", (req, res) => {
+  res.json({ message: "Events routes working 🚀" });
+});
 
 // ✅ GET /api/events -> lista eventos públicos
 router.get("/", async (req, res, next) => {
@@ -14,45 +20,67 @@ router.get("/", async (req, res, next) => {
   }
 });
 
-// ✅ GET /api/events/test -> prueba rápida
-router.get("/test", (req, res) => {
-  res.json({ message: "Events routes working 🚀" });
-});
-
-// GET /api/events/:eventId -> detalle evento (público si isPublic = true)
+// ✅ GET /api/events/:eventId -> detalle evento + comentarios (público si isPublic = true)
 router.get("/:eventId", async (req, res, next) => {
   try {
     const { eventId } = req.params;
 
-    // Validación ObjectId (para no morir en Postman)
-    const mongoose = require("mongoose");
     if (!mongoose.Types.ObjectId.isValid(eventId)) {
       return res.status(400).json({ message: "Invalid eventId" });
     }
 
-    const event = await Event.findById(eventId);
+    const event = await Event.findById(eventId).populate("createdBy", "name email");
 
     if (!event) {
       return res.status(404).json({ message: "Event not found" });
     }
 
-    // Si algún día tienes eventos privados, aquí filtras:
+    // MVP: si no es público, no se muestra
     if (!event.isPublic) {
       return res.status(403).json({ message: "This event is private" });
     }
 
-    res.json(event);
+    const comments = await Comment.find({ event: eventId })
+      .populate("author", "name email")
+      .sort({ createdAt: -1 });
+
+    return res.json({ event, comments });
   } catch (err) {
     next(err);
   }
 });
 
-// PUT /api/events/:eventId -> editar evento (solo dueño)
+// ✅ POST /api/events -> crear evento (requiere login)
+router.post("/", isAuthenticated, async (req, res, next) => {
+  try {
+    const { title, description, date, location, isPublic } = req.body;
+
+    if (!title || !description || !date || !location) {
+      return res.status(400).json({
+        message: "Missing fields: title, description, date, location are required",
+      });
+    }
+
+    const createdEvent = await Event.create({
+      title,
+      description,
+      date, // ISO recomendado: "2026-01-20T18:00:00.000Z"
+      location,
+      isPublic: isPublic ?? true,
+      createdBy: req.payload._id,
+    });
+
+    res.status(201).json(createdEvent);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ✅ PUT /api/events/:eventId -> editar evento (solo dueño)
 router.put("/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
 
-    const mongoose = require("mongoose");
     if (!mongoose.Types.ObjectId.isValid(eventId)) {
       return res.status(400).json({ message: "Invalid eventId" });
     }
@@ -87,12 +115,11 @@ router.put("/:eventId", isAuthenticated, async (req, res, next) => {
   }
 });
 
-// DELETE /api/events/:eventId -> borrar evento (solo dueño)
+// ✅ DELETE /api/events/:eventId -> borrar evento (solo dueño) + borrar comentarios asociados
 router.delete("/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
 
-    const mongoose = require("mongoose");
     if (!mongoose.Types.ObjectId.isValid(eventId)) {
       return res.status(400).json({ message: "Invalid eventId" });
     }
@@ -107,41 +134,10 @@ router.delete("/:eventId", isAuthenticated, async (req, res, next) => {
       return res.status(403).json({ message: "Not allowed" });
     }
 
-    await Comment.deleteMany({ event: eventId }); // borrar comentarios asociados
-
+    await Comment.deleteMany({ event: eventId });
     await Event.findByIdAndDelete(eventId);
 
-    res.status(204).send(); // No Content
-  } catch (err) {
-    next(err);
-  }
-});
-
-
-
-
-// ✅ POST /api/events -> crear evento (PRIVADO)
-router.post("/", isAuthenticated, async (req, res, next) => {
-  try {
-    const { title, description, date, location, isPublic } = req.body;
-
-    // Validación mínima para no morir en Postman
-    if (!title || !description || !date || !location) {
-      return res.status(400).json({
-        message: "Missing fields: title, description, date, location are required",
-      });
-    }
-
-    const createdEvent = await Event.create({
-      title,
-      description,
-      date, // ISO string recomendado: "2026-01-20T18:00:00.000Z"
-      location,
-      isPublic: isPublic ?? true,
-      createdBy: req.payload._id, // viene del JWT middleware
-    });
-
-    res.status(201).json(createdEvent);
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

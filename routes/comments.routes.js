@@ -1,5 +1,6 @@
 const router = require("express").Router();
 const mongoose = require("mongoose");
+
 const Comment = require("../models/Comment.model");
 const { isAuthenticated } = require("../middleware/jwt.middleware");
 
@@ -47,7 +48,6 @@ router.get("/event/:eventId", async (req, res, next) => {
   }
 });
 
-
 // ✅ DELETE /api/comments/:commentId -> borrar comentario (solo autor)
 router.delete("/:commentId", isAuthenticated, async (req, res, next) => {
   try {
@@ -68,11 +68,10 @@ router.delete("/:commentId", isAuthenticated, async (req, res, next) => {
     }
 
     await Comment.findByIdAndDelete(commentId);
-    res.status(204).send();
+    return res.status(204).send();
   } catch (err) {
     next(err);
   }
 });
-
 
 module.exports = router;
