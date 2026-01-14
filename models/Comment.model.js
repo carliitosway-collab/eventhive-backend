@@ -13,6 +13,7 @@ const commentSchema = new mongoose.Schema(
       ref: "Event",
       required: true,
     },
+    // ✅ este campo lo usaremos para permisos (dueño del comentario)
     author: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -23,4 +24,3 @@ const commentSchema = new mongoose.Schema(
 );
 
 module.exports = mongoose.model("Comment", commentSchema);
-

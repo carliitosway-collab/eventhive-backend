@@ -28,11 +28,21 @@ const eventSchema = new mongoose.Schema(
       default: true,
     },
 
+    // ✅ dueño del evento
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
     },
+
+    // ✅ INSCRIPCIONES (attendees)
+    attendees: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: [],
+      },
+    ],
   },
   {
     timestamps: true,

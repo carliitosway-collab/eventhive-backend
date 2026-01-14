@@ -68,7 +68,7 @@ router.delete("/:commentId", isAuthenticated, async (req, res, next) => {
     }
 
     await Comment.findByIdAndDelete(commentId);
-    return res.status(204).send();
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

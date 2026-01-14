@@ -3,28 +3,66 @@ const mongoose = require("mongoose");
 
 const Event = require("../models/Event.model");
 const Comment = require("../models/Comment.model");
-const { isAuthenticated } = require("../middleware/jwt.middleware");
+const { isAuthenticated, isAuthenticatedOptional } = require("../middleware/jwt.middleware");
 
-// ✅ GET /api/events/test -> prueba rápida (IMPORTANTE: antes de "/:eventId")
+// ✅ GET /api/events/test
 router.get("/test", (req, res) => {
-  res.json({ data: { message: "Events routes working 🚀" } });
+  res.json({ message: "Events routes working 🚀", data: null });
 });
 
-// ✅ GET /api/events -> lista eventos públicos
-router.get("/", async (req, res, next) => {
+// ✅ GET /api/events
+// Query params:
+// - search=texto (title/location/description)
+// - from=YYYY-MM-DD
+// - to=YYYY-MM-DD
+// - mine=true  (requiere token, trae mis eventos incluso privados)
+router.get("/", isAuthenticatedOptional, async (req, res, next) => {
   try {
-    const events = await Event.find({ isPublic: true })
+    const { search, from, to, mine } = req.query;
+
+    const filter = {};
+
+    // mine=true => solo eventos creados por mí (incluye privados)
+    if (mine === "true") {
+      if (!req.payload?._id) {
+        return res.status(401).json({ message: "Missing authorization token" });
+      }
+      filter.createdBy = req.payload._id;
+    } else {
+      // listado público normal
+      filter.isPublic = true;
+    }
+
+    // search
+    if (search) {
+      const regex = new RegExp(search, "i");
+      filter.$or = [{ title: regex }, { location: regex }, { description: regex }];
+    }
+
+    // date range
+    if (from || to) {
+      filter.date = {};
+      if (from) filter.date.$gte = new Date(from);
+      if (to) filter.date.$lte = new Date(to);
+    }
+
+    const events = await Event.find(filter)
       .populate("createdBy", "name email")
       .sort({ date: 1 });
 
-    res.json({ data: events });
+    return res.status(200).json({
+      message: "Events fetched",
+      data: events,
+    });
   } catch (err) {
     next(err);
   }
 });
 
-// ✅ GET /api/events/:eventId -> detalle evento + comentarios (público si isPublic = true)
-router.get("/:eventId", async (req, res, next) => {
+// ✅ GET /api/events/:eventId -> detalle + comments
+// público: cualquiera
+// privado: SOLO creador (requiere token)
+router.get("/:eventId", isAuthenticatedOptional, async (req, res, next) => {
   try {
     const { eventId } = req.params;
 
@@ -32,21 +70,30 @@ router.get("/:eventId", async (req, res, next) => {
       return res.status(400).json({ message: "Invalid eventId" });
     }
 
-    const event = await Event.findById(eventId).populate("createdBy", "name email");
+    const event = await Event.findById(eventId)
+      .populate("createdBy", "name email")
+      .populate("attendees", "name email");
 
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
-    }
+    if (!event) return res.status(404).json({ message: "Event not found" });
 
+    // privado => solo creador
     if (!event.isPublic) {
-      return res.status(403).json({ message: "This event is private" });
+      if (!req.payload?._id) {
+        return res.status(401).json({ message: "Missing authorization token" });
+      }
+      if (String(event.createdBy._id) !== String(req.payload._id)) {
+        return res.status(403).json({ message: "This event is private" });
+      }
     }
 
     const comments = await Comment.find({ event: eventId })
       .populate("author", "name email")
       .sort({ createdAt: -1 });
 
-    return res.json({ data: { event, comments } });
+    return res.status(200).json({
+      message: "Event fetched",
+      data: { event, comments },
+    });
   } catch (err) {
     next(err);
   }
@@ -66,19 +113,82 @@ router.post("/", isAuthenticated, async (req, res, next) => {
     const createdEvent = await Event.create({
       title,
       description,
-      date, // ISO recomendado: "2026-01-20T18:00:00.000Z"
+      date,
       location,
       isPublic: isPublic ?? true,
       createdBy: req.payload._id,
+      attendees: [],
     });
 
-    res.status(201).json({ data: createdEvent });
+    return res.status(201).json({
+      message: "Event created",
+      data: createdEvent,
+    });
   } catch (err) {
     next(err);
   }
 });
 
-// ✅ PUT /api/events/:eventId -> editar evento (solo dueño)
+// ✅ POST /api/events/:eventId/join -> apuntarse (requiere login)
+router.post("/:eventId/join", isAuthenticated, async (req, res, next) => {
+  try {
+    const { eventId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(eventId)) {
+      return res.status(400).json({ message: "Invalid eventId" });
+    }
+
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ message: "Event not found" });
+
+    // privado => solo creador puede "join" (coherente)
+    if (!event.isPublic && String(event.createdBy) !== String(req.payload._id)) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    const updated = await Event.findByIdAndUpdate(
+      eventId,
+      { $addToSet: { attendees: req.payload._id } },
+      { new: true }
+    ).populate("attendees", "name email");
+
+    return res.status(200).json({
+      message: "Joined event",
+      data: updated,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ✅ DELETE /api/events/:eventId/join -> desapuntarse (requiere login)
+router.delete("/:eventId/join", isAuthenticated, async (req, res, next) => {
+  try {
+    const { eventId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(eventId)) {
+      return res.status(400).json({ message: "Invalid eventId" });
+    }
+
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ message: "Event not found" });
+
+    const updated = await Event.findByIdAndUpdate(
+      eventId,
+      { $pull: { attendees: req.payload._id } },
+      { new: true }
+    ).populate("attendees", "name email");
+
+    return res.status(200).json({
+      message: "Left event",
+      data: updated,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ✅ PUT /api/events/:eventId -> editar (solo dueño)
 router.put("/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -88,11 +198,8 @@ router.put("/:eventId", isAuthenticated, async (req, res, next) => {
     }
 
     const event = await Event.findById(eventId);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
-    }
+    if (!event) return res.status(404).json({ message: "Event not found" });
 
-    // ✅ Owner check
     if (String(event.createdBy) !== String(req.payload._id)) {
       return res.status(403).json({ message: "Not allowed" });
     }
@@ -111,13 +218,16 @@ router.put("/:eventId", isAuthenticated, async (req, res, next) => {
       { new: true, runValidators: true }
     );
 
-    res.json({ data: updated });
+    return res.status(200).json({
+      message: "Event updated",
+      data: updated,
+    });
   } catch (err) {
     next(err);
   }
 });
 
-// ✅ DELETE /api/events/:eventId -> borrar evento (solo dueño) + borrar comentarios asociados
+// ✅ DELETE /api/events/:eventId -> borrar (solo dueño) + borrar comments
 router.delete("/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -127,11 +237,8 @@ router.delete("/:eventId", isAuthenticated, async (req, res, next) => {
     }
 
     const event = await Event.findById(eventId);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
-    }
+    if (!event) return res.status(404).json({ message: "Event not found" });
 
-    // ✅ Owner check
     if (String(event.createdBy) !== String(req.payload._id)) {
       return res.status(403).json({ message: "Not allowed" });
     }
@@ -139,7 +246,7 @@ router.delete("/:eventId", isAuthenticated, async (req, res, next) => {
     await Comment.deleteMany({ event: eventId });
     await Event.findByIdAndDelete(eventId);
 
-    res.status(204).send();
+    return res.status(204).send();
   } catch (err) {
     next(err);
   }
