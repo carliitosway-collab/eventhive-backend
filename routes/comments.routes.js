@@ -23,7 +23,7 @@ router.post("/", isAuthenticated, async (req, res, next) => {
       author: req.payload._id,
     });
 
-    res.status(201).json(created);
+    res.status(201).json({ data: created });
   } catch (err) {
     next(err);
   }
@@ -42,7 +42,7 @@ router.get("/event/:eventId", async (req, res, next) => {
       .populate("author", "name email")
       .sort({ createdAt: -1 });
 
-    res.json(comments);
+    res.json({ data: comments });
   } catch (err) {
     next(err);
   }

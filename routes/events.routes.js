@@ -7,14 +7,17 @@ const { isAuthenticated } = require("../middleware/jwt.middleware");
 
 // ✅ GET /api/events/test -> prueba rápida (IMPORTANTE: antes de "/:eventId")
 router.get("/test", (req, res) => {
-  res.json({ message: "Events routes working 🚀" });
+  res.json({ data: { message: "Events routes working 🚀" } });
 });
 
 // ✅ GET /api/events -> lista eventos públicos
 router.get("/", async (req, res, next) => {
   try {
-    const events = await Event.find({ isPublic: true }).sort({ date: 1 });
-    res.json(events);
+    const events = await Event.find({ isPublic: true })
+      .populate("createdBy", "name email")
+      .sort({ date: 1 });
+
+    res.json({ data: events });
   } catch (err) {
     next(err);
   }
@@ -35,7 +38,6 @@ router.get("/:eventId", async (req, res, next) => {
       return res.status(404).json({ message: "Event not found" });
     }
 
-  
     if (!event.isPublic) {
       return res.status(403).json({ message: "This event is private" });
     }
@@ -44,7 +46,7 @@ router.get("/:eventId", async (req, res, next) => {
       .populate("author", "name email")
       .sort({ createdAt: -1 });
 
-    return res.json({ event, comments });
+    return res.json({ data: { event, comments } });
   } catch (err) {
     next(err);
   }
@@ -70,7 +72,7 @@ router.post("/", isAuthenticated, async (req, res, next) => {
       createdBy: req.payload._id,
     });
 
-    res.status(201).json(createdEvent);
+    res.status(201).json({ data: createdEvent });
   } catch (err) {
     next(err);
   }
@@ -109,7 +111,7 @@ router.put("/:eventId", isAuthenticated, async (req, res, next) => {
       { new: true, runValidators: true }
     );
 
-    res.json(updated);
+    res.json({ data: updated });
   } catch (err) {
     next(err);
   }
