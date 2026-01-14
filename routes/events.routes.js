@@ -1,6 +1,8 @@
 const router = require("express").Router();
 const Event = require("../models/Event.model");
 const { isAuthenticated } = require("../middleware/jwt.middleware");
+const Comment = require("../models/Comment.model");
+
 
 // ✅ GET /api/events -> lista eventos públicos
 router.get("/", async (req, res, next) => {
@@ -104,6 +106,8 @@ router.delete("/:eventId", isAuthenticated, async (req, res, next) => {
     if (String(event.createdBy) !== String(req.payload._id)) {
       return res.status(403).json({ message: "Not allowed" });
     }
+
+    await Comment.deleteMany({ event: eventId }); // borrar comentarios asociados
 
     await Event.findByIdAndDelete(eventId);
 
