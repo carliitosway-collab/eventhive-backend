@@ -35,7 +35,7 @@ router.get("/:eventId", async (req, res, next) => {
       return res.status(404).json({ message: "Event not found" });
     }
 
-    // MVP: si no es público, no se muestra
+  
     if (!event.isPublic) {
       return res.status(403).json({ message: "This event is private" });
     }
