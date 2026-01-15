@@ -6,7 +6,7 @@ const Comment = require("../models/Comment.model");
 const { isAuthenticated, isAuthenticatedOptional } = require("../middleware/jwt.middleware");
 
 router.get("/test", (req, res) => {
-  res.json({ message: "Events routes working 🚀", data: null });
+  res.json({ message: "Events routes working ", data: null });
 });
 
 router.get("/", isAuthenticatedOptional, async (req, res, next) => {
