@@ -1,6 +1,5 @@
 const { expressjwt: jwt } = require("express-jwt");
 
-// Function used to extract the JWT token from the request's 'Authorization' Headers
 function getTokenFromHeaders(req) {
   if (
     req.headers.authorization &&
@@ -11,7 +10,6 @@ function getTokenFromHeaders(req) {
   return null;
 }
 
-// ✅ Required auth (si no hay token -> 401)
 const isAuthenticated = jwt({
   secret: process.env.TOKEN_SECRET,
   algorithms: ["HS256"],
@@ -19,7 +17,6 @@ const isAuthenticated = jwt({
   getToken: getTokenFromHeaders,
 });
 
-// ✅ Optional auth (si hay token lo valida y setea payload, si no hay token no falla)
 const isAuthenticatedOptional = jwt({
   secret: process.env.TOKEN_SECRET,
   algorithms: ["HS256"],

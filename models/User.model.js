@@ -1,6 +1,5 @@
 const { Schema, model } = require("mongoose");
 
-// User schema
 const userSchema = new Schema(
   {
     email: {
@@ -10,18 +9,14 @@ const userSchema = new Schema(
       lowercase: true,
       trim: true,
     },
-
     password: {
       type: String,
       required: [true, "Password is required."],
     },
-
     name: {
       type: String,
       required: [true, "Name is required."],
     },
-
-    // ⭐ Favoritos: eventos guardados por el usuario
     favorites: [
       {
         type: Schema.Types.ObjectId,
@@ -30,11 +25,7 @@ const userSchema = new Schema(
       },
     ],
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-const User = model("User", userSchema);
-
-module.exports = User;
+module.exports = model("User", userSchema);

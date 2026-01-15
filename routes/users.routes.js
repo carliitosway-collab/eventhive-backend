@@ -5,7 +5,6 @@ const User = require("../models/User.model");
 const Event = require("../models/Event.model");
 const { isAuthenticated } = require("../middleware/jwt.middleware");
 
-// ✅ GET /api/users/me/favorites -> lista favoritos (con populate)
 router.get("/me/favorites", isAuthenticated, async (req, res, next) => {
   try {
     const user = await User.findById(req.payload._id).populate("favorites");
@@ -20,7 +19,6 @@ router.get("/me/favorites", isAuthenticated, async (req, res, next) => {
   }
 });
 
-// ✅ POST /api/users/me/favorites/:eventId -> añadir favorito (sin duplicados)
 router.post("/me/favorites/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -30,11 +28,8 @@ router.post("/me/favorites/:eventId", isAuthenticated, async (req, res, next) =>
     }
 
     const event = await Event.findById(eventId);
-    if (!event) {
-      return res.status(404).json({ message: "Event not found" });
-    }
+    if (!event) return res.status(404).json({ message: "Event not found" });
 
-    // ✅ si el evento es privado, solo su dueño puede favoritearlo
     if (!event.isPublic && String(event.createdBy) !== String(req.payload._id)) {
       return res.status(403).json({ message: "Not allowed" });
     }
@@ -54,7 +49,6 @@ router.post("/me/favorites/:eventId", isAuthenticated, async (req, res, next) =>
   }
 });
 
-// ✅ DELETE /api/users/me/favorites/:eventId -> quitar favorito (no rompe si no existía)
 router.delete("/me/favorites/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;

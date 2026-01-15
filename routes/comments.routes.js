@@ -3,8 +3,8 @@ const mongoose = require("mongoose");
 
 const Comment = require("../models/Comment.model");
 const { isAuthenticated } = require("../middleware/jwt.middleware");
+const { isCommentAuthor } = require("../middleware/permissions.middleware");
 
-// ✅ POST /api/comments -> crear comentario (requiere login)
 router.post("/", isAuthenticated, async (req, res, next) => {
   try {
     const { text, eventId } = req.body;
@@ -29,7 +29,6 @@ router.post("/", isAuthenticated, async (req, res, next) => {
   }
 });
 
-// ✅ GET /api/comments/event/:eventId -> listar comentarios de un evento (público)
 router.get("/event/:eventId", async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -48,27 +47,11 @@ router.get("/event/:eventId", async (req, res, next) => {
   }
 });
 
-// ✅ DELETE /api/comments/:commentId -> borrar comentario (solo autor)
-router.delete("/:commentId", isAuthenticated, async (req, res, next) => {
+router.delete("/:commentId", isAuthenticated, isCommentAuthor, async (req, res, next) => {
   try {
     const { commentId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(commentId)) {
-      return res.status(400).json({ message: "Invalid commentId" });
-    }
-
-    const comment = await Comment.findById(commentId);
-    if (!comment) {
-      return res.status(404).json({ message: "Comment not found" });
-    }
-
-    // ✅ Solo el autor puede borrar
-    if (String(comment.author) !== String(req.payload._id)) {
-      return res.status(403).json({ message: "Not allowed" });
-    }
-
     await Comment.findByIdAndDelete(commentId);
-    res.status(204).send();
+    return res.status(204).send();
   } catch (err) {
     next(err);
   }

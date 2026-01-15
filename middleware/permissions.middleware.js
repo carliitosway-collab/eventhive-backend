@@ -1,7 +1,6 @@
 const mongoose = require("mongoose");
 const Comment = require("../models/Comment.model");
 
-// ✅ Solo el autor del comentario puede borrarlo
 const isCommentAuthor = async (req, res, next) => {
   try {
     const { commentId } = req.params;

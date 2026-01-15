@@ -5,29 +5,32 @@ const Event = require("../models/Event.model");
 const Comment = require("../models/Comment.model");
 const { isAuthenticated, isAuthenticatedOptional } = require("../middleware/jwt.middleware");
 
-// ✅ GET /api/events/test
 router.get("/test", (req, res) => {
   res.json({ message: "Events routes working 🚀", data: null });
 });
 
-// ✅ GET /api/events
-// Query params:
-// - search=texto (title/location/description)
-// - from=YYYY-MM-DD
-// - to=YYYY-MM-DD
-// - mine=true  (requiere token, trae mis eventos incluso privados)
 router.get("/", isAuthenticatedOptional, async (req, res, next) => {
   try {
-    const { search, from, to, mine } = req.query;
-
+    const { search, from, to, mine, attending } = req.query;
     const filter = {};
 
-    // mine=true => solo eventos creados por mí (incluye privados)
-    if (mine === "true") {
+    // ✅ mine / attending requieren token
+    if (mine === "true" || attending === "true") {
       if (!req.payload?._id) {
         return res.status(401).json({ message: "Missing authorization token" });
       }
-      filter.createdBy = req.payload._id;
+
+      if (mine === "true" && attending === "true") {
+        // ambos: creados por mí O donde estoy inscrito
+        filter.$or = [
+          { createdBy: req.payload._id },
+          { attendees: req.payload._id },
+        ];
+      } else if (mine === "true") {
+        filter.createdBy = req.payload._id;
+      } else {
+        filter.attendees = req.payload._id;
+      }
     } else {
       // listado público normal
       filter.isPublic = true;
@@ -36,7 +39,15 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
     // search
     if (search) {
       const regex = new RegExp(search, "i");
-      filter.$or = [{ title: regex }, { location: regex }, { description: regex }];
+      const searchClause = [{ title: regex }, { location: regex }, { description: regex }];
+
+      // si ya hay $or por mine+attending, lo combinamos con $and
+      if (filter.$or) {
+        filter.$and = [{ $or: filter.$or }, { $or: searchClause }];
+        delete filter.$or;
+      } else {
+        filter.$or = searchClause;
+      }
     }
 
     // date range
@@ -59,9 +70,6 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
   }
 });
 
-// ✅ GET /api/events/:eventId -> detalle + comments
-// público: cualquiera
-// privado: SOLO creador (requiere token)
 router.get("/:eventId", isAuthenticatedOptional, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -99,7 +107,6 @@ router.get("/:eventId", isAuthenticatedOptional, async (req, res, next) => {
   }
 });
 
-// ✅ POST /api/events -> crear evento (requiere login)
 router.post("/", isAuthenticated, async (req, res, next) => {
   try {
     const { title, description, date, location, isPublic } = req.body;
@@ -129,7 +136,6 @@ router.post("/", isAuthenticated, async (req, res, next) => {
   }
 });
 
-// ✅ POST /api/events/:eventId/join -> apuntarse (requiere login)
 router.post("/:eventId/join", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -141,7 +147,6 @@ router.post("/:eventId/join", isAuthenticated, async (req, res, next) => {
     const event = await Event.findById(eventId);
     if (!event) return res.status(404).json({ message: "Event not found" });
 
-    // privado => solo creador puede "join" (coherente)
     if (!event.isPublic && String(event.createdBy) !== String(req.payload._id)) {
       return res.status(403).json({ message: "Not allowed" });
     }
@@ -161,7 +166,6 @@ router.post("/:eventId/join", isAuthenticated, async (req, res, next) => {
   }
 });
 
-// ✅ DELETE /api/events/:eventId/join -> desapuntarse (requiere login)
 router.delete("/:eventId/join", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -188,7 +192,6 @@ router.delete("/:eventId/join", isAuthenticated, async (req, res, next) => {
   }
 });
 
-// ✅ PUT /api/events/:eventId -> editar (solo dueño)
 router.put("/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -227,7 +230,6 @@ router.put("/:eventId", isAuthenticated, async (req, res, next) => {
   }
 });
 
-// ✅ DELETE /api/events/:eventId -> borrar (solo dueño) + borrar comments
 router.delete("/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
