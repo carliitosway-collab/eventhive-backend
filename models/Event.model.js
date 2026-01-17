@@ -26,4 +26,7 @@ const eventSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Recommended index for common queries (sorting & filtering)
+eventSchema.index({ isPublic: 1, date: 1, title: 1, location: 1 });
+
 module.exports = mongoose.model("Event", eventSchema);

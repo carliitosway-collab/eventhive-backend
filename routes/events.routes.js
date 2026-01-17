@@ -11,37 +11,47 @@ router.get("/test", (req, res) => {
 
 router.get("/", isAuthenticatedOptional, async (req, res, next) => {
   try {
-    const { search, from, to, mine, attending } = req.query;
+    const {
+      // backward compatible
+      search,
+      // new standard param (optional)
+      q,
+      from,
+      to,
+      mine,
+      attending,
+      // new pagination/sort (optional)
+      page = 1,
+      limit = 20,
+      sort = "date",
+    } = req.query;
+
     const filter = {};
 
-    // ✅ mine / attending requieren token
+    // mine / attending require token
     if (mine === "true" || attending === "true") {
       if (!req.payload?._id) {
         return res.status(401).json({ message: "Missing authorization token" });
       }
 
       if (mine === "true" && attending === "true") {
-        // ambos: creados por mí O donde estoy inscrito
-        filter.$or = [
-          { createdBy: req.payload._id },
-          { attendees: req.payload._id },
-        ];
+        filter.$or = [{ createdBy: req.payload._id }, { attendees: req.payload._id }];
       } else if (mine === "true") {
         filter.createdBy = req.payload._id;
       } else {
         filter.attendees = req.payload._id;
       }
     } else {
-      // listado público normal
       filter.isPublic = true;
     }
 
-    // search
-    if (search) {
-      const regex = new RegExp(search, "i");
+    // search (supports both ?search= and ?q=)
+    const term = (q ?? search ?? "").trim();
+    if (term) {
+      const regex = new RegExp(term, "i");
       const searchClause = [{ title: regex }, { location: regex }, { description: regex }];
 
-      // si ya hay $or por mine+attending, lo combinamos con $and
+      // if we already had $or (mine+attending), combine with $and
       if (filter.$or) {
         filter.$and = [{ $or: filter.$or }, { $or: searchClause }];
         delete filter.$or;
@@ -57,13 +67,42 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
       if (to) filter.date.$lte = new Date(to);
     }
 
-    const events = await Event.find(filter)
-      .populate("createdBy", "name email")
-      .sort({ date: 1 });
+    // pagination (safe)
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 50);
+    const skip = (pageNum - 1) * limitNum;
+
+    // sort (supports "date" or "-date")
+    const sortObj = {};
+    const sortStr = typeof sort === "string" ? sort : "date";
+    if (sortStr.startsWith("-")) {
+      sortObj[sortStr.slice(1)] = -1;
+    } else {
+      sortObj[sortStr] = 1;
+    }
+
+    const [events, total] = await Promise.all([
+      Event.find(filter)
+        .populate("createdBy", "name email")
+        .sort(sortObj)
+        .skip(skip)
+        .limit(limitNum),
+      Event.countDocuments(filter),
+    ]);
+
+    const pages = Math.max(Math.ceil(total / limitNum), 1);
 
     return res.status(200).json({
       message: "Events fetched",
       data: events,
+      meta: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages,
+        sort: sortStr,
+        q: term || "",
+      },
     });
   } catch (err) {
     next(err);
@@ -84,7 +123,7 @@ router.get("/:eventId", isAuthenticatedOptional, async (req, res, next) => {
 
     if (!event) return res.status(404).json({ message: "Event not found" });
 
-    // privado => solo creador
+    // private => only creator
     if (!event.isPublic) {
       if (!req.payload?._id) {
         return res.status(401).json({ message: "Missing authorization token" });
