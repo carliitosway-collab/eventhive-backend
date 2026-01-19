@@ -3,7 +3,16 @@ const mongoose = require("mongoose");
 
 const Event = require("../models/Event.model");
 const Comment = require("../models/Comment.model");
-const { isAuthenticated, isAuthenticatedOptional } = require("../middleware/jwt.middleware");
+const {
+  isAuthenticated,
+  isAuthenticatedOptional,
+} = require("../middleware/jwt.middleware");
+
+function toNullableNumber(value) {
+  if (value === "" || value === undefined || value === null) return null;
+  const n = Number(value);
+  return Number.isNaN(n) ? null : n;
+}
 
 router.get("/test", (req, res) => {
   res.json({ message: "Events routes working ", data: null });
@@ -35,7 +44,10 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
       }
 
       if (mine === "true" && attending === "true") {
-        filter.$or = [{ createdBy: req.payload._id }, { attendees: req.payload._id }];
+        filter.$or = [
+          { createdBy: req.payload._id },
+          { attendees: req.payload._id },
+        ];
       } else if (mine === "true") {
         filter.createdBy = req.payload._id;
       } else {
@@ -49,7 +61,15 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
     const term = (q ?? search ?? "").trim();
     if (term) {
       const regex = new RegExp(term, "i");
-      const searchClause = [{ title: regex }, { location: regex }, { description: regex }];
+      const searchClause = [
+        { title: regex },
+        { location: regex },
+        { description: regex },
+        { venueName: regex },
+        { address: regex },
+        { city: regex },
+        { country: regex },
+      ];
 
       // if we already had $or (mine+attending), combine with $and
       if (filter.$or) {
@@ -148,13 +168,33 @@ router.get("/:eventId", isAuthenticatedOptional, async (req, res, next) => {
 
 router.post("/", isAuthenticated, async (req, res, next) => {
   try {
-    const { title, description, date, location, isPublic } = req.body;
+    const {
+      title,
+      description,
+      date,
+      location,
+      isPublic,
+
+      // NEW (optional)
+      venueName,
+      address,
+      city,
+      country,
+      coordinates,
+      imageUrl,
+    } = req.body;
 
     if (!title || !description || !date || !location) {
       return res.status(400).json({
-        message: "Missing fields: title, description, date, location are required",
+        message:
+          "Missing fields: title, description, date, location are required",
       });
     }
+
+    const safeCoords = {
+      lat: toNullableNumber(coordinates?.lat),
+      lng: toNullableNumber(coordinates?.lng),
+    };
 
     const createdEvent = await Event.create({
       title,
@@ -162,6 +202,14 @@ router.post("/", isAuthenticated, async (req, res, next) => {
       date,
       location,
       isPublic: isPublic ?? true,
+
+      venueName: (venueName ?? "").trim(),
+      address: (address ?? "").trim(),
+      city: (city ?? "").trim(),
+      country: (country ?? "").trim(),
+      coordinates: safeCoords,
+      imageUrl: typeof imageUrl === "string" ? imageUrl.trim() : "",
+
       createdBy: req.payload._id,
       attendees: [],
     });
@@ -186,14 +234,17 @@ router.post("/:eventId/join", isAuthenticated, async (req, res, next) => {
     const event = await Event.findById(eventId);
     if (!event) return res.status(404).json({ message: "Event not found" });
 
-    if (!event.isPublic && String(event.createdBy) !== String(req.payload._id)) {
+    if (
+      !event.isPublic &&
+      String(event.createdBy) !== String(req.payload._id)
+    ) {
       return res.status(403).json({ message: "Not allowed" });
     }
 
     const updated = await Event.findByIdAndUpdate(
       eventId,
       { $addToSet: { attendees: req.payload._id } },
-      { new: true }
+      { new: true },
     ).populate("attendees", "name email");
 
     return res.status(200).json({
@@ -219,7 +270,7 @@ router.delete("/:eventId/join", isAuthenticated, async (req, res, next) => {
     const updated = await Event.findByIdAndUpdate(
       eventId,
       { $pull: { attendees: req.payload._id } },
-      { new: true }
+      { new: true },
     ).populate("attendees", "name email");
 
     return res.status(200).json({
@@ -246,24 +297,124 @@ router.put("/:eventId", isAuthenticated, async (req, res, next) => {
       return res.status(403).json({ message: "Not allowed" });
     }
 
-    const { title, description, date, location, isPublic } = req.body;
+    const {
+      title,
+      description,
+      date,
+      location,
+      isPublic,
 
-    const updated = await Event.findByIdAndUpdate(
-      eventId,
-      {
-        ...(title !== undefined && { title }),
-        ...(description !== undefined && { description }),
-        ...(date !== undefined && { date }),
-        ...(location !== undefined && { location }),
-        ...(isPublic !== undefined && { isPublic }),
-      },
-      { new: true, runValidators: true }
-    );
+      // NEW (optional)
+      venueName,
+      address,
+      city,
+      country,
+      coordinates,
+      imageUrl,
+    } = req.body;
+
+    const updateDoc = {
+      ...(title !== undefined && { title }),
+      ...(description !== undefined && { description }),
+      ...(date !== undefined && { date }),
+      ...(location !== undefined && { location }),
+      ...(isPublic !== undefined && { isPublic }),
+
+      ...(venueName !== undefined && { venueName: (venueName ?? "").trim() }),
+      ...(address !== undefined && { address: (address ?? "").trim() }),
+      ...(city !== undefined && { city: (city ?? "").trim() }),
+      ...(country !== undefined && { country: (country ?? "").trim() }),
+      ...(imageUrl !== undefined && {
+        imageUrl: typeof imageUrl === "string" ? imageUrl.trim() : "",
+      }),
+    };
+
+    if (coordinates !== undefined) {
+      updateDoc.coordinates = {
+        lat: toNullableNumber(coordinates?.lat),
+        lng: toNullableNumber(coordinates?.lng),
+      };
+    }
+
+    const updated = await Event.findByIdAndUpdate(eventId, updateDoc, {
+      new: true,
+      runValidators: true,
+    });
 
     return res.status(200).json({
       message: "Event updated",
       data: updated,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// NEW: Add photo URL (owner only)
+// POST /api/events/:eventId/photos  { url: "https://..." }
+router.post("/:eventId/photos", isAuthenticated, async (req, res, next) => {
+  try {
+    const { eventId } = req.params;
+    const { url } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(eventId)) {
+      return res.status(400).json({ message: "Invalid eventId" });
+    }
+
+    const cleanUrl = typeof url === "string" ? url.trim() : "";
+    if (!cleanUrl) {
+      return res.status(400).json({ message: "Missing photo url" });
+    }
+
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ message: "Event not found" });
+
+    if (String(event.createdBy) !== String(req.payload._id)) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    const updated = await Event.findByIdAndUpdate(
+      eventId,
+      { $addToSet: { photos: cleanUrl } },
+      { new: true },
+    );
+
+    return res.status(200).json({ message: "Photo added", data: updated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// NEW: Remove photo URL (owner only)
+// DELETE /api/events/:eventId/photos  { url: "https://..." }
+router.delete("/:eventId/photos", isAuthenticated, async (req, res, next) => {
+  try {
+    const { eventId } = req.params;
+    const { url } = req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(eventId)) {
+      return res.status(400).json({ message: "Invalid eventId" });
+    }
+
+    const cleanUrl = typeof url === "string" ? url.trim() : "";
+    if (!cleanUrl) {
+      return res.status(400).json({ message: "Missing photo url" });
+    }
+
+    const event = await Event.findById(eventId);
+    if (!event) return res.status(404).json({ message: "Event not found" });
+
+    if (String(event.createdBy) !== String(req.payload._id)) {
+      return res.status(403).json({ message: "Not allowed" });
+    }
+
+    const updated = await Event.findByIdAndUpdate(
+      eventId,
+      { $pull: { photos: cleanUrl } },
+      { new: true },
+    );
+
+    return res.status(200).json({ message: "Photo removed", data: updated });
   } catch (err) {
     next(err);
   }
