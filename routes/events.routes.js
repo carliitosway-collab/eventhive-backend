@@ -15,9 +15,13 @@ function toNullableNumber(value) {
 }
 
 router.get("/test", (req, res) => {
-  res.json({ message: "Events routes working ", data: null });
+  res.json({ message: "Events routes working", data: null });
 });
 
+// GET /api/events
+// Public list (no token): only isPublic=true
+// With token + ?mine=true / ?attending=true: filters by owner/attendee
+// Supports q/search, from/to, category, pagination, sort
 router.get("/", isAuthenticatedOptional, async (req, res, next) => {
   try {
     const {
@@ -29,7 +33,11 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
       to,
       mine,
       attending,
-      // new pagination/sort (optional)
+
+      // category filter (optional)
+      category,
+
+      // pagination/sort (optional)
       page = 1,
       limit = 20,
       sort = "date",
@@ -57,6 +65,11 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
       filter.isPublic = true;
     }
 
+    // category filter (works for public + mine/attending)
+    if (typeof category === "string" && category.trim()) {
+      filter.category = category.trim();
+    }
+
     // search (supports both ?search= and ?q=)
     const term = (q ?? search ?? "").trim();
     if (term) {
@@ -69,9 +82,10 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
         { address: regex },
         { city: regex },
         { country: regex },
+        { category: regex },
       ];
 
-      // if we already had $or (mine+attending), combine with $and
+      // If we already had $or (mine+attending), combine with $and
       if (filter.$or) {
         filter.$and = [{ $or: filter.$or }, { $or: searchClause }];
         delete filter.$or;
@@ -122,6 +136,7 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
         pages,
         sort: sortStr,
         q: term || "",
+        category: typeof category === "string" ? category.trim() : "",
       },
     });
   } catch (err) {
@@ -129,6 +144,7 @@ router.get("/", isAuthenticatedOptional, async (req, res, next) => {
   }
 });
 
+// GET /api/events/:eventId -> event detail + comments
 router.get("/:eventId", isAuthenticatedOptional, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -166,6 +182,7 @@ router.get("/:eventId", isAuthenticatedOptional, async (req, res, next) => {
   }
 });
 
+// POST /api/events -> create (owner)
 router.post("/", isAuthenticated, async (req, res, next) => {
   try {
     const {
@@ -175,13 +192,14 @@ router.post("/", isAuthenticated, async (req, res, next) => {
       location,
       isPublic,
 
-      // NEW (optional)
       venueName,
       address,
       city,
       country,
       coordinates,
       imageUrl,
+
+      category,
     } = req.body;
 
     if (!title || !description || !date || !location) {
@@ -210,6 +228,11 @@ router.post("/", isAuthenticated, async (req, res, next) => {
       coordinates: safeCoords,
       imageUrl: typeof imageUrl === "string" ? imageUrl.trim() : "",
 
+      category:
+        typeof category === "string" && category.trim()
+          ? category.trim()
+          : "Other",
+
       createdBy: req.payload._id,
       attendees: [],
     });
@@ -223,6 +246,7 @@ router.post("/", isAuthenticated, async (req, res, next) => {
   }
 });
 
+// POST /api/events/:eventId/join -> join (authenticated)
 router.post("/:eventId/join", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -256,6 +280,7 @@ router.post("/:eventId/join", isAuthenticated, async (req, res, next) => {
   }
 });
 
+// DELETE /api/events/:eventId/join -> leave (authenticated)
 router.delete("/:eventId/join", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -282,6 +307,7 @@ router.delete("/:eventId/join", isAuthenticated, async (req, res, next) => {
   }
 });
 
+// PUT /api/events/:eventId -> update (owner)
 router.put("/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;
@@ -304,13 +330,14 @@ router.put("/:eventId", isAuthenticated, async (req, res, next) => {
       location,
       isPublic,
 
-      // NEW (optional)
       venueName,
       address,
       city,
       country,
       coordinates,
       imageUrl,
+
+      category,
     } = req.body;
 
     const updateDoc = {
@@ -324,8 +351,16 @@ router.put("/:eventId", isAuthenticated, async (req, res, next) => {
       ...(address !== undefined && { address: (address ?? "").trim() }),
       ...(city !== undefined && { city: (city ?? "").trim() }),
       ...(country !== undefined && { country: (country ?? "").trim() }),
+
       ...(imageUrl !== undefined && {
         imageUrl: typeof imageUrl === "string" ? imageUrl.trim() : "",
+      }),
+
+      ...(category !== undefined && {
+        category:
+          typeof category === "string" && category.trim()
+            ? category.trim()
+            : "Other",
       }),
     };
 
@@ -350,76 +385,7 @@ router.put("/:eventId", isAuthenticated, async (req, res, next) => {
   }
 });
 
-// NEW: Add photo URL (owner only)
-// POST /api/events/:eventId/photos  { url: "https://..." }
-router.post("/:eventId/photos", isAuthenticated, async (req, res, next) => {
-  try {
-    const { eventId } = req.params;
-    const { url } = req.body;
-
-    if (!mongoose.Types.ObjectId.isValid(eventId)) {
-      return res.status(400).json({ message: "Invalid eventId" });
-    }
-
-    const cleanUrl = typeof url === "string" ? url.trim() : "";
-    if (!cleanUrl) {
-      return res.status(400).json({ message: "Missing photo url" });
-    }
-
-    const event = await Event.findById(eventId);
-    if (!event) return res.status(404).json({ message: "Event not found" });
-
-    if (String(event.createdBy) !== String(req.payload._id)) {
-      return res.status(403).json({ message: "Not allowed" });
-    }
-
-    const updated = await Event.findByIdAndUpdate(
-      eventId,
-      { $addToSet: { photos: cleanUrl } },
-      { new: true },
-    );
-
-    return res.status(200).json({ message: "Photo added", data: updated });
-  } catch (err) {
-    next(err);
-  }
-});
-
-// NEW: Remove photo URL (owner only)
-// DELETE /api/events/:eventId/photos  { url: "https://..." }
-router.delete("/:eventId/photos", isAuthenticated, async (req, res, next) => {
-  try {
-    const { eventId } = req.params;
-    const { url } = req.body;
-
-    if (!mongoose.Types.ObjectId.isValid(eventId)) {
-      return res.status(400).json({ message: "Invalid eventId" });
-    }
-
-    const cleanUrl = typeof url === "string" ? url.trim() : "";
-    if (!cleanUrl) {
-      return res.status(400).json({ message: "Missing photo url" });
-    }
-
-    const event = await Event.findById(eventId);
-    if (!event) return res.status(404).json({ message: "Event not found" });
-
-    if (String(event.createdBy) !== String(req.payload._id)) {
-      return res.status(403).json({ message: "Not allowed" });
-    }
-
-    const updated = await Event.findByIdAndUpdate(
-      eventId,
-      { $pull: { photos: cleanUrl } },
-      { new: true },
-    );
-
-    return res.status(200).json({ message: "Photo removed", data: updated });
-  } catch (err) {
-    next(err);
-  }
-});
-
+// DELETE /api/events/:eventId -> delete (owner) + cascade comments
 router.delete("/:eventId", isAuthenticated, async (req, res, next) => {
   try {
     const { eventId } = req.params;

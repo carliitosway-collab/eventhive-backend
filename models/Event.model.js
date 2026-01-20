@@ -9,7 +9,7 @@ const eventSchema = new mongoose.Schema(
     // Legacy (no lo rompemos)
     location: { type: String, required: true, trim: true },
 
-    // NEW (pro)
+    // Pro fields (opcionales)
     venueName: { type: String, trim: true, default: "" },
     address: { type: String, trim: true, default: "" },
     city: { type: String, trim: true, default: "" },
@@ -20,12 +20,25 @@ const eventSchema = new mongoose.Schema(
       lng: { type: Number, default: null },
     },
 
-    // NEW: fotos reales (guardamos URLs)
-    // NEW: imagen principal del evento (una sola)
-    imageUrl: {
+    // Single main image URL
+    imageUrl: { type: String, trim: true, default: "" },
+
+    category: {
       type: String,
       trim: true,
-      default: "",
+      default: "Other",
+      enum: [
+        "Tech",
+        "Music",
+        "Sports",
+        "Food",
+        "Networking",
+        "Art",
+        "Gaming",
+        "Education",
+        "Business",
+        "Other",
+      ],
     },
 
     isPublic: { type: Boolean, default: true },
@@ -47,8 +60,8 @@ const eventSchema = new mongoose.Schema(
   { timestamps: true },
 );
 
-// Recommended index for common queries (sorting & filtering)
-eventSchema.index({ isPublic: 1, date: 1, title: 1, location: 1 });
+// Indexes (mantén los útiles, sin redundancia)
+eventSchema.index({ isPublic: 1, date: 1, category: 1, title: 1 });
 eventSchema.index({ city: 1, date: 1 });
 
 module.exports = mongoose.model("Event", eventSchema);
