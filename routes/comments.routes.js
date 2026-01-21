@@ -63,6 +63,31 @@ router.get("/event/:eventId", async (req, res, next) => {
   }
 });
 
+// ✅ NEW: GET /api/comments/:commentId -> { data: comment }
+// ✅ GET /api/comments/:commentId -> comment details
+router.get("/:commentId", isAuthenticated, async (req, res, next) => {
+  try {
+    const { commentId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(commentId)) {
+      return res.status(400).json({ message: "Invalid commentId" });
+    }
+
+    const comment = await Comment.findById(commentId)
+      .populate("author", "name email")
+      .populate({
+        path: "parentComment",
+        populate: { path: "author", select: "name email" },
+      });
+
+    if (!comment) return res.status(404).json({ message: "Comment not found" });
+
+    return res.status(200).json({ data: comment });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post("/:commentId/like", isAuthenticated, async (req, res, next) => {
   try {
     const { commentId } = req.params;
