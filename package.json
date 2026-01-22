@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "seed:events": "node seeds/events.seed.cjs",
+    "seed:events:reset": "node seeds/events.seed.cjs --reset"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
